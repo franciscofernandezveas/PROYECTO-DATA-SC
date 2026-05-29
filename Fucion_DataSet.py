@@ -53,7 +53,7 @@ def registrar_etapa(df, nombre_etapa, stats):
     return df
 
 # =====================================================================
-# FUNCIÓN DE LIMPIEZA PARA INFORME_VENTAS
+# FUNCIÓN DE LIMPIEZA PARA INFORME_VENTAS - ACTUALIZADA
 # =====================================================================
 def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True):
     """
@@ -75,8 +75,45 @@ def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True)
 
     df = registrar_etapa(df, "despues_carga", stats)
 
-    # 2️⃣ NORMALIZACIÓN DE TEXTOS
-    logger.info("\n2. Normalizando textos...")
+    # 2️⃣ ELIMINAR PRODUCTOS NO REALES (PROPINA E IMPORTE PERSONALIZADO)
+    logger.info("\n2. Eliminando productos no reales (Propina, Importe personalizado)...")
+    if 'Descripción' in df.columns:
+        filas_antes = len(df)
+        
+        # Normalizar descripciones para mejor detección
+        df['Descripcion_normalizada_filtro'] = (
+            df['Descripción']
+            .astype(str)
+            .str.normalize('NFKD')
+            .str.encode('ascii', errors='ignore')
+            .str.decode('utf-8')
+            .str.strip()
+            .str.lower()
+        )
+        
+        # Máscara para eliminar propinas e importes personalizados
+        mask_no_reales = df['Descripcion_normalizada_filtro'].str.contains(
+            r'\b(propina|importe.*personalizado|tip)\b',
+            case=False,
+            regex=True,
+            na=False
+        )
+        
+        df_filtrado = df[~mask_no_reales]
+        filas_eliminadas = filas_antes - len(df_filtrado)
+        stats['filas_no_reales_eliminadas'] = filas_eliminadas
+        
+        logger.info(f"   [OK] Productos no reales eliminados: {filas_eliminadas} filas")
+        logger.info("   [INFO] Se eliminaron: Propina, Importe personalizado, Tip")
+        
+        # Eliminar columna temporal
+        df_filtrado = df_filtrado.drop('Descripcion_normalizada_filtro', axis=1)
+        df = df_filtrado
+        
+    df = registrar_etapa(df, "despues_filtro_no_reales", stats)
+
+    # 3️⃣ NORMALIZACIÓN DE TEXTOS
+    logger.info("\n3. Normalizando textos...")
     columnas_texto = df.select_dtypes(include=['object']).columns.tolist()
 
     columnas_excluir_numeros = [
@@ -102,8 +139,8 @@ def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True)
             )
     logger.info("   [OK] Normalización de textos completada")
 
-    # 3️⃣ ELIMINACIÓN DE DUPLICADOS
-    logger.info("\n3. Eliminando duplicados...")
+    # 4️⃣ ELIMINACIÓN DE DUPLICADOS
+    logger.info("\n4. Eliminando duplicados...")
     filas_antes = len(df)
     df = df.drop_duplicates()
     duplicados_eliminados = filas_antes - len(df)
@@ -111,8 +148,8 @@ def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True)
     logger.info(f"   [OK] Duplicados eliminados: {duplicados_eliminados}")
     df = registrar_etapa(df, "despues_duplicados", stats)
 
-    # 4️⃣ NORMALIZACIÓN DE NOMBRES DE COLUMNAS
-    logger.info("\n4. Normalizando nombres de columnas...")
+    # 5️⃣ NORMALIZACIÓN DE NOMBRES DE COLUMNAS
+    logger.info("\n5. Normalizando nombres de columnas...")
     df.columns = (
         df.columns
         .str.strip()
@@ -123,8 +160,8 @@ def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True)
     )
     logger.info(f"   Columnas normalizadas: {list(df.columns)}")
 
-    # 5️⃣ MANEJO INTELIGENTE DE FECHAS
-    logger.info("\n5. Manejo inteligente de fechas...")
+    # 6️⃣ MANEJO INTELIGENTE DE FECHAS
+    logger.info("\n6. Manejo inteligente de fechas...")
     if 'Fecha' in df.columns:
         try:
             df['fecha_original_valor'] = df['Fecha'].copy()
@@ -146,8 +183,8 @@ def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True)
             logger.error(f"   [ERROR] Error manejando fechas: {e}")
             df['fecha_problema'] = False
 
-    # 6️⃣ VALIDACIÓN DE CAMPOS NUMÉRICOS
-    logger.info("\n6. Validando campos numéricos...")
+    # 7️⃣ VALIDACIÓN DE CAMPOS NUMÉRICOS
+    logger.info("\n7. Validando campos numéricos...")
     campos_numericos = [
         'Cantidad', 'Precio_sin_descuento', 'Descuento',
         'Precio_Bruto', 'Precio_Neto', 'IVA'
@@ -172,8 +209,8 @@ def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True)
             except Exception as e:
                 logger.error(f"   [ERROR] Error validando {campo_normalizado}: {e}")
 
-    # 7️⃣ NORMALIZACIÓN DE LA CUENTA/SEDE
-    logger.info("\n7. Normalizando sedes...")
+    # 8️⃣ NORMALIZACIÓN DE LA CUENTA/SEDE
+    logger.info("\n8. Normalizando sedes...")
     if 'Cuenta' in df.columns:
         cuenta_lower = df['Cuenta'].astype(str).str.lower()
 
@@ -197,34 +234,6 @@ def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True)
         logger.info(
             f"   [INFO] Sedes identificadas: {df['Sede_Normalizada'].value_counts().to_dict()}"
         )
-
-    # 8️⃣ FILTRADO DE DESCRIPCIONES NO DESEADAS
-    logger.info("\n8. Filtrando descripciones no deseadas...")
-    if 'Descripcion' in df.columns:
-        filas_antes = len(df)
-        df['Descripcion'] = (
-            df['Descripcion']
-            .str.normalize('NFKD')
-            .str.encode('ascii', errors='ignore')
-            .str.decode('utf-8')
-            .str.strip()
-            .str.lower()
-        )
-
-        mask_propinas = df['Descripcion'].str.contains(
-            r'\b(tip|propina)\b',
-            case=False,
-            regex=True,
-            na=False
-        )
-        df_filtrado = df[~mask_propinas]
-        filas_eliminadas = filas_antes - len(df_filtrado)
-        stats['filas_propinas_eliminadas'] = filas_eliminadas
-        logger.info(
-            f"   [OK] Descripciones de propinas filtradas: {filas_eliminadas} filas eliminadas"
-        )
-        df = df_filtrado
-        df = registrar_etapa(df, "despues_propinas_filtradas", stats)
 
     # 9️⃣ VALIDACIÓN DE PRECIOS POSITIVOS
     logger.info("\n9. Validando precios positivos...")
@@ -294,7 +303,251 @@ def limpiar_informe_ventas(input_file, output_file=None, eliminar_outliers=True)
     return df, stats
 
 # =====================================================================
-# FUNCIÓN DE LIMPIEZA PARA TRANSACCIONES
+# FUNCIÓN PARA CREAR DATASET ML DIRECTO DESDE INFORME_VENTAS
+# =====================================================================
+def crear_dataset_ml_desde_ventas(df_ventas_limpio, output_file=None):
+    """
+    Crea dataset optimizado para ML directamente desde informe_ventas limpio
+    """
+    logger.info("=== CREANDO DATASET ML DESDE INFORME_VENTAS ===")
+    
+    try:
+        df_ml = df_ventas_limpio.copy()
+        
+        # 1. PROCESAR FECHAS
+        logger.info("1. Procesando fechas...")
+        if 'Fecha' in df_ml.columns:
+            df_ml['Fecha'] = pd.to_datetime(df_ml['Fecha'], errors='coerce')
+            df_ml['anio'] = df_ml['Fecha'].dt.year
+            df_ml['mes'] = df_ml['Fecha'].dt.month
+            df_ml['dia'] = df_ml['Fecha'].dt.day
+            df_ml['dia_semana'] = df_ml['Fecha'].dt.dayofweek
+            df_ml['semana_anio'] = df_ml['Fecha'].dt.isocalendar().week
+            logger.info("   ✓ Fechas procesadas")
+        
+        # 2. NORMALIZAR TEXTOS
+        logger.info("2. Normalizando textos para ML...")
+        if 'Descripción' in df_ml.columns:
+            df_ml['Descripcion_normalizada'] = (
+                df_ml['Descripción']
+                .astype(str)
+                .str.normalize('NFKD')
+                .str.encode('ascii', errors='ignore')
+                .str.decode('utf-8')
+                .str.strip()
+                .str.lower()
+            )
+        
+        if 'Categoría' in df_ml.columns:
+            df_ml['Categoria_normalizada'] = (
+                df_ml['Categoría']
+                .astype(str)
+                .str.normalize('NFKD')
+                .str.encode('ascii', errors='ignore')
+                .str.decode('utf-8')
+                .str.strip()
+                .str.lower()
+            )
+        
+        # 3. ASEGURAR TIPOS NUMÉRICOS
+        logger.info("3. Validando campos numéricos...")
+        campos_numericos = ['Cantidad', 'Precio_sin_descuento', 'Descuento', 
+                           'Precio_Bruto', 'Precio_Neto', 'IVA']
+        
+        for campo in campos_numericos:
+            campo_normalizado = campo.replace(' ', '_').replace('(', '').replace(')', '')
+            if campo_normalizado in df_ml.columns:
+                df_ml[campo_normalizado] = pd.to_numeric(df_ml[campo_normalizado], errors='coerce').fillna(0)
+        
+        # 4. CREAR DATASET AGREGADO PARA PREDICCIÓN
+        logger.info("4. Creando dataset agregado para predicción...")
+        
+        # Definir columnas de agrupación
+        cols_agrupacion = []
+        if 'Descripcion_normalizada' in df_ml.columns:
+            cols_agrupacion.append('Descripcion_normalizada')
+        if 'Categoria_normalizada' in df_ml.columns:
+            cols_agrupacion.append('Categoria_normalizada')
+        if 'Sede_Normalizada' in df_ml.columns:
+            cols_agrupacion.append('Sede_Normalizada')
+        
+        cols_agrupacion.extend(['anio', 'mes', 'dia', 'dia_semana'])
+        
+        # Filtrar solo columnas que existen
+        cols_agrupacion = [col for col in cols_agrupacion if col in df_ml.columns]
+        
+        # Agregación
+        agg_dict = {}
+        if 'Cantidad' in df_ml.columns:
+            agg_dict['Cantidad'] = 'sum'  # Demanda total
+        if 'Precio_Neto' in df_ml.columns:
+            agg_dict['Precio_Neto'] = 'mean'  # Precio promedio
+        if 'Precio_Bruto' in df_ml.columns:
+            agg_dict['Precio_Bruto'] = 'sum'  # Ventas totales
+        
+        if agg_dict:  # Solo si hay columnas para agregar
+            df_ml_agregado = df_ml.groupby(cols_agrupacion).agg(agg_dict).reset_index()
+            
+            # Renombrar columnas para claridad
+            rename_dict = {}
+            if 'Cantidad' in agg_dict:
+                rename_dict['Cantidad'] = 'demanda_total'
+            if 'Precio_Neto' in agg_dict:
+                rename_dict['Precio_Neto'] = 'precio_promedio'
+            if 'Precio_Bruto' in agg_dict:
+                rename_dict['Precio_Bruto'] = 'venta_total_bruta'
+            
+            df_ml_agregado = df_ml_agregado.rename(columns=rename_dict)
+            
+            # Agregar conteo de transacciones
+            df_ml_agregado['num_transacciones'] = df_ml.groupby(cols_agrupacion).size().values
+            
+            # Agregar features adicionales
+            if 'Descripcion_normalizada' in df_ml_agregado.columns and 'Sede_Normalizada' in df_ml_agregado.columns:
+                try:
+                    # Demanda promedio por producto y sede
+                    demanda_producto_sede = df_ml_agregado.groupby(['Descripcion_normalizada', 'Sede_Normalizada'])['demanda_total'].mean().reset_index()
+                    demanda_producto_sede = demanda_producto_sede.rename(columns={'demanda_total': 'demanda_promedio_producto'})
+                    df_ml_agregado = pd.merge(df_ml_agregado, demanda_producto_sede, on=['Descripcion_normalizada', 'Sede_Normalizada'], how='left')
+                    
+                    # Demanda promedio por categoría y sede
+                    demanda_categoria_sede = df_ml_agregado.groupby(['Categoria_normalizada', 'Sede_Normalizada'])['demanda_total'].mean().reset_index()
+                    demanda_categoria_sede = demanda_categoria_sede.rename(columns={'demanda_total': 'demanda_promedio_categoria'})
+                    df_ml_agregado = pd.merge(df_ml_agregado, demanda_categoria_sede, on=['Categoria_normalizada', 'Sede_Normalizada'], how='left')
+                    
+                except Exception as e:
+                    logger.warning(f"   ⚠ Error calculando features adicionales: {e}")
+            
+            # Validación final
+            if 'demanda_total' in df_ml_agregado.columns and 'Sede_Normalizada' in df_ml_agregado.columns:
+                df_ml_agregado = df_ml_agregado[
+                    (df_ml_agregado['demanda_total'] >= 0) & 
+                    (df_ml_agregado['Sede_Normalizada'] != 'Sede No Identificada')
+                ]
+            
+            logger.info(f"   ✓ Dataset ML final: {df_ml_agregado.shape[0]} registros, {df_ml_agregado.shape[1]} columnas")
+            
+            # Exportar
+            if output_file:
+                df_ml_agregado.to_csv(output_file, index=False, encoding='utf-8')
+                logger.info(f"   ✓ Dataset ML guardado en: {output_file}")
+                
+                # Guardar también el dataset detallado
+                detalle_file = output_file.replace('.csv', '_detalle.csv')
+                df_ml.to_csv(detalle_file, index=False, encoding='utf-8')
+                logger.info(f"   ✓ Dataset detallado guardado en: {detalle_file}")
+            
+            return df_ml_agregado
+        else:
+            logger.error("   ✗ No se encontraron columnas para agregar")
+            return None
+            
+    except Exception as e:
+        logger.error(f"   ✗ Error creando dataset ML: {str(e)}")
+        return None
+
+# =====================================================================
+# FUNCIÓN PRINCIPAL - EJECUTAR PROCESO OPTIMIZADO
+# =====================================================================
+def ejecutar_etl_optimizado():
+    """
+    Ejecuta proceso ETL optimizado usando solo informe_ventas
+    """
+    logger.info("🚀 INICIANDO PROCESO ETL OPTIMIZADO (Solo Informe Ventas)")
+    
+    # Ruta de archivo
+    ruta_ventas = r"C:\Users\Francisco\Downloads\ETL PORTACAFE\informe_ventas.csv"
+    
+    # Verificar que exista el archivo
+    if not os.path.exists(ruta_ventas):
+        logger.error(f"❌ No se encuentra archivo de ventas: {ruta_ventas}")
+        return None
+    
+    logger.info("✅ Archivo encontrado")
+    
+    try:
+        # 1. LIMPIAR INFORME DE VENTAS (con corrección de productos no reales)
+        logger.info("📋 LIMPIANDO INFORME DE VENTAS...")
+        df_ventas_limpio, stats_ventas = limpiar_informe_ventas(
+            ruta_ventas, 
+            output_file='informe_ventas_limpio.csv'
+        )
+        
+        if df_ventas_limpio is None:
+            logger.error("❌ Error limpiando informe de ventas")
+            return None
+        
+        logger.info(f"✅ Informe de ventas limpio: {len(df_ventas_limpio)} registros")
+        
+        # 2. CREAR DATASET ML DIRECTO
+        logger.info("🎯 CREANDO DATASET ML PARA PREDICCIÓN...")
+        df_ml = crear_dataset_ml_desde_ventas(
+            df_ventas_limpio,
+            output_file='dataset_ml_prediccion_optimizado.csv'
+        )
+        
+        if df_ml is None:
+            logger.error("❌ Error creando dataset ML")
+            return None
+        
+        # 3. GENERAR REPORTES
+        logger.info("📊 GENERANDO REPORTES...")
+        
+        # Reporte de ventas
+        reporte_ventas = {
+            'total_registros_iniciales': stats_ventas.get('filas_iniciales', 0),
+            'total_registros_finales': stats_ventas.get('filas_finales', 0),
+            'porcentaje_retencion': stats_ventas.get('porcentaje_retencion', 0),
+            'filas_no_reales_eliminadas': stats_ventas.get('filas_no_reales_eliminadas', 0),
+            'sedes_identificadas': df_ventas_limpio['Sede_Normalizada'].value_counts().to_dict() if 'Sede_Normalizada' in df_ventas_limpio.columns else {}
+        }
+        
+        with open('reporte_ventas_optimizado.json', 'w', encoding='utf-8') as f:
+            json.dump(reporte_ventas, f, indent=2, default=str, ensure_ascii=False)
+        
+        # Reporte del dataset ML
+        if df_ml is not None:
+            reporte_ml = {
+                'total_registros': len(df_ml),
+                'total_columnas': len(df_ml.columns),
+                'columnas': list(df_ml.columns),
+                'sedes': df_ml['Sede_Normalizada'].value_counts().to_dict() if 'Sede_Normalizada' in df_ml.columns else {},
+                'productos_unicos': df_ml['Descripcion_normalizada'].nunique() if 'Descripcion_normalizada' in df_ml.columns else 0,
+                'categorias': df_ml['Categoria_normalizada'].value_counts().to_dict() if 'Categoria_normalizada' in df_ml.columns else {},
+            }
+            
+            with open('reporte_dataset_ml_optimizado.json', 'w', encoding='utf-8') as f:
+                json.dump(reporte_ml, f, indent=2, default=str, ensure_ascii=False)
+        
+        logger.info("✅ REPORTES GENERADOS")
+        
+        # 4. MOSTRAR RESUMEN FINAL
+        logger.info("🎉 PROCESO COMPLETADO EXITOSAMENTE")
+        logger.info("=" * 50)
+        logger.info("ARCHIVOS GENERADOS:")
+        logger.info("├── informe_ventas_limpio.csv")
+        logger.info("├── dataset_ml_prediccion_optimizado.csv")
+        logger.info("├── dataset_ml_prediccion_optimizado_detalle.csv")
+        logger.info("├── reporte_ventas_optimizado.json")
+        logger.info("└── reporte_dataset_ml_optimizado.json")
+        logger.info("=" * 50)
+        if df_ml is not None:
+            logger.info(f"📊 DATASET ML FINAL:")
+            logger.info(f"   • Registros: {len(df_ml):,}")
+            logger.info(f"   • Columnas: {len(df_ml.columns)}")
+            if 'Descripcion_normalizada' in df_ml.columns:
+                logger.info(f"   • Productos únicos: {df_ml['Descripcion_normalizada'].nunique():,}")
+            if 'Sede_Normalizada' in df_ml.columns:
+                logger.info(f"   • Sedes: {df_ml['Sede_Normalizada'].nunique()}")
+        
+        return df_ml
+        
+    except Exception as e:
+        logger.error(f"❌ Error en proceso ETL optimizado: {str(e)}")
+        return None
+
+# =====================================================================
+# MANTENER FUNCIÓN ORIGINAL PARA COMPATIBILIDAD
 # =====================================================================
 def limpiar_transacciones(input_file, output_file=None):
     """
@@ -440,9 +693,6 @@ def limpiar_transacciones(input_file, output_file=None):
     logger.info("=== LIMPIEZA DE TRANSACCIONES COMPLETADA ===")
     return df, stats
 
-# =====================================================================
-# FUNCIÓN PARA UNIFICAR DATASETS - VERSIÓN CORREGIDA
-# =====================================================================
 def unificar_datasets_ventas(df_ventas, df_transacciones, output_file=None):
     """
     Unifica los datasets limpios para crear dataset para ML
@@ -635,9 +885,6 @@ def unificar_datasets_ventas(df_ventas, df_transacciones, output_file=None):
         logger.error(f"   ✗ Error en unificación: {str(e)}")
         return None
 
-# =====================================================================
-# FUNCIÓN PRINCIPAL - EJECUTAR TODO EL PROCESO
-# =====================================================================
 def ejecutar_etl_completo():
     """
     Ejecuta todo el proceso ETL completo
@@ -740,7 +987,7 @@ def ejecutar_etl_completo():
         logger.info("✅ REPORTES GENERADOS")
         
         # 5. MOSTRAR RESUMEN FINAL
-        logger.info(" PROCESO COMPLETADO EXITOSAMENTE")
+        logger.info("🎉 PROCESO COMPLETADO EXITOSAMENTE")
         logger.info("=" * 50)
         logger.info("ARCHIVOS GENERADOS:")
         logger.info("├── informe_ventas_limpio.csv")
@@ -752,7 +999,7 @@ def ejecutar_etl_completo():
         logger.info("└── reporte_dataset_ml.json")
         logger.info("=" * 50)
         if df_ml is not None:
-            logger.info(f" DATASET ML FINAL:")
+            logger.info(f"📊 DATASET ML FINAL:")
             logger.info(f"   • Registros: {len(df_ml):,}")
             logger.info(f"   • Columnas: {len(df_ml.columns)}")
             if 'Descripcion_normalizada' in df_ml.columns:
@@ -770,10 +1017,20 @@ def ejecutar_etl_completo():
 # EJECUTAR EL PROCESO
 # =====================================================================
 if __name__ == "__main__":
-    dataset_final = ejecutar_etl_completo()
+    # Primero intentar el proceso optimizado (solo informe_ventas)
+    logger.info("🔧 INICIANDO PROCESO OPTIMIZADO (Recomendado)...")
+    dataset_optimizado = ejecutar_etl_optimizado()
     
-    if dataset_final is not None:
-        logger.info("✅ PROCESO ETL FINALIZADO CORRECTAMENTE")
+    if dataset_optimizado is not None:
+        logger.info("✅ PROCESO OPTIMIZADO FINALIZADO CORRECTAMENTE")
         logger.info("📁 Los archivos han sido generados en el directorio actual")
     else:
-        logger.error("❌ EL PROCESO ETL NO SE COMPLETÓ")
+        logger.warning("⚠️  PROCESO OPTIMIZADO FALLÓ, INTENTANDO PROCESO COMPLETO...")
+        # Si falla, intentar el proceso completo
+        dataset_completo = ejecutar_etl_completo()
+        
+        if dataset_completo is not None:
+            logger.info("✅ PROCESO COMPLETO FINALIZADO CORRECTAMENTE")
+            logger.info("📁 Los archivos han sido generados en el directorio actual")
+        else:
+            logger.error("❌ AMBOS PROCESOS FALLARON")
