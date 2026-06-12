@@ -7,11 +7,11 @@ Favor revisar especialmente las observaciones metodológicas relacionadas con:
 
 formulación del problema,
 
-construcción del dataset,
+construcción del dataset,(Listo)
 
-validación,
+validación,(en el archivo 'validacion_modelo.py'(listo))
 
-y coherencia entre solución propuesta e implementación.
+y coherencia entre solución propuesta e implementación. (definimos predecir la demanda de un producto con XGBoost en una determinada sede,nosotros escogimos capuccino,listo)
 
 
 Las observaciones buscan orientar mejoras para la siguiente etapa del proyecto.
